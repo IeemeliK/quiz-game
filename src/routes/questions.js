@@ -1,7 +1,10 @@
 import express from "express";
 import { prisma } from "../lib/prisma.js";
+import { authenticate } from "../middleware/auth.js";
+import { isOwner } from "../middleware/isOwner.js";
 
 const router = express.Router();
+router.use(authenticate);
 
 function formatQuestion(question) {
 	return {
@@ -74,6 +77,7 @@ router.post("/", async (req, res) => {
 	const newQuestion = await prisma.question.create({
 		data: {
 			question,
+			userId: req.user.userId,
 			answers: {
 				create: answerArray.map((a) => ({
 					answer: a,
@@ -87,7 +91,7 @@ router.post("/", async (req, res) => {
 });
 
 // PUT /questions/:qID
-router.put("/:qID", async (req, res) => {
+router.put("/:qID", isOwner, async (req, res) => {
 	const qID = Number(req.params.qID);
 	const { question: q, answers } = req.body;
 
@@ -125,7 +129,7 @@ router.put("/:qID", async (req, res) => {
 });
 
 // DELETE /questions/:qID
-router.delete("/:qID", async (req, res) => {
+router.delete("/:qID", isOwner, async (req, res) => {
 	const qID = Number(req.params.qID);
 
 	const existingQuestion = await prisma.question.findUnique({

@@ -1,12 +1,14 @@
 import express, { json } from "express";
 import questionsRouter from "./routes/questions.js";
 import { prisma } from "./lib/prisma.js";
+import { router as authRouter } from "./routes/auth.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware to parse JSON bodies (will be useful in later steps)
 app.use(json());
+app.use("/api/auth", authRouter);
 app.use("/api/questions", questionsRouter);
 
 app.use((_req, res) => {
