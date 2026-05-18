@@ -4,10 +4,12 @@ import { authenticate } from "../middleware/auth.js";
 import { isOwner } from "../middleware/isOwner.js";
 import multer from "multer";
 import path from "node:path";
+import { z } from "zod";
+import { NotFoundError, ValidationError } from "../lib/errors.js";
 
 const storage = multer.diskStorage({
 	destination: path.join(import.meta.dirname, "..", "..", "public", "uploads"),
-	filename: (req, file, cb) => {
+	filename: (_req, file, cb) => {
 		const ext = path.extname(file.originalname);
 		cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`);
 	},
@@ -15,15 +17,30 @@ const storage = multer.diskStorage({
 
 const upload = multer({
 	storage,
-	fileFilter: (req, file, cb) => {
+	fileFilter: (_req, file, cb) => {
 		if (file.mimetype.startsWith("image/")) cb(null, true);
-		else cb(new Error("Only image files are allowed"));
+		else cb(new ValidationError("Only image files are allowed"));
 	},
 	limits: { fileSize: 5 * 1024 * 1024 },
 });
 
 const router = express.Router();
 router.use(authenticate);
+router.use((err, _req, res, next) => {
+	if (
+		err instanceof multer.MulterError ||
+		err?.message === "Only image files are allowed"
+	) {
+		return res.status(400).json({ msg: err.message });
+	}
+	next(err);
+});
+
+const QuestionInput = z.object({
+	question: z.string().min(1),
+	answers: z.array(z.string()).min(1),
+	keywords: z.union([z.string(), z.array(z.string())]).optional(),
+});
 
 function formatQuestion(question) {
 	const solved = question.attempts?.some((at) => at.solved) ?? false;
@@ -105,16 +122,21 @@ router.get("/:qID", async (req, res) => {
 
 // POST /questions
 router.post("/", upload.single("image"), async (req, res) => {
-	const { question, answers, keywords } = req.body;
+	const { question, answers, keywords } = QuestionInput.parse(req.body);
 
 	if (!question || !answers) {
-		return res.status(400).json({
-			message: "Question and answer are required",
-		});
+		req.log?.warn(
+			{ userId: req.user.userId },
+			"Question creation: missing question or answer",
+		);
+		throw new ValidationError("Question and answer are required");
 	}
 
-	const answerArray = answers.split("\n");
-	const keywordArray = keywords.split(",");
+	const answerArray = Array.isArray(answers) ? answers : answers.split("\n");
+	let keywordArray = [];
+	if (keywords) {
+		keywordArray = Array.isArray(keywords) ? keywords : keywords.split(",");
+	}
 	const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
 
 	const newQuestion = await prisma.question.create({
@@ -142,29 +164,39 @@ router.post("/", upload.single("image"), async (req, res) => {
 	});
 
 	res.status(201).json(formatQuestion(newQuestion));
+	req.log?.info(
+		{ qID: newQuestion.id, userId: req.user.userId },
+		"Question created",
+	);
 });
 
 // PUT /questions/:qID
 router.put("/:qID", upload.single("image"), isOwner, async (req, res) => {
 	const qID = Number(req.params.qID);
-	const { question: q, answers, keywords } = req.body;
+	const { question: q, answers, keywords } = QuestionInput.parse(req.body);
 
 	const existingQuestion = await prisma.question.findUnique({
 		where: { id: qID },
 	});
 
 	if (!existingQuestion) {
-		return res.status(404).json({ message: "Question not found" });
+		req.log?.warn({ qID, userId: req.user.userId }, "Question not found");
+		throw new NotFoundError("Question not found");
 	}
 
 	if (!q || !answers) {
-		return res.status(400).json({
-			message: "Question and answer are required",
-		});
+		req.log?.warn(
+			{ userId: req.user.userId },
+			"Question update: missing question or answer",
+		);
+		throw new ValidationError("Question and answer are required");
 	}
 
-	const answerArray = answers.split("\n");
-	const keywordArray = keywords.split(",");
+	const answerArray = Array.isArray(answers) ? answers : answers.split("\n");
+	let keywordArray = [];
+	if (keywords) {
+		keywordArray = Array.isArray(keywords) ? keywords : keywords.split(",");
+	}
 
 	const data = {
 		question: q,
@@ -195,6 +227,7 @@ router.put("/:qID", upload.single("image"), isOwner, async (req, res) => {
 	});
 
 	res.json(formatQuestion(updatedQuestion));
+	req.log?.info({ userId: req.user.userId, qID }, "Question updated");
 });
 
 // DELETE /questions/:qID
@@ -211,7 +244,8 @@ router.delete("/:qID", isOwner, async (req, res) => {
 	});
 
 	if (!existingQuestion) {
-		return res.status(404).json({ message: "Question not found" });
+		req.log?.warn({ qID, userId: req.user?.userId }, "Question not found");
+		throw new NotFoundError("Question not found");
 	}
 
 	await prisma.question.delete({ where: { id: qID } });
@@ -220,6 +254,7 @@ router.delete("/:qID", isOwner, async (req, res) => {
 		message: "Question deleted successfully",
 		question: formatQuestion(existingQuestion),
 	});
+	req.log?.info({ qID, userId: req.user?.userId }, "Question deleted");
 });
 
 // POST /questions/:qID/play
@@ -232,7 +267,8 @@ router.post("/:qID/play", async (req, res) => {
 	});
 
 	if (!question) {
-		return res.status(404).json({ message: "Question not found" });
+		req.log?.warn({ qID, userId: req.user?.userId }, "Question not found");
+		throw new NotFoundError("Question not found");
 	}
 
 	const solved = question.answers.some(
@@ -258,6 +294,7 @@ router.post("/:qID/play", async (req, res) => {
 		correctAnswers: question.answers.map((a) => a.answer),
 		createdAt: attempt.createdAt,
 	});
+	req.log?.info({ qID, userId: req.user.userId, solved }, "Question attempted");
 });
 
 export default router;
