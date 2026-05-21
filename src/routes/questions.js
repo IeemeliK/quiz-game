@@ -31,14 +31,14 @@ router.use((err, _req, res, next) => {
 		err instanceof multer.MulterError ||
 		err?.message === "Only image files are allowed"
 	) {
-		return res.status(400).json({ msg: err.message });
+		throw new NotFoundError(err.message);
 	}
 	next(err);
 });
 
 const QuestionInput = z.object({
 	question: z.string().min(1),
-	answers: z.array(z.string()).min(1),
+	answers: z.string().min(1),
 	keywords: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
@@ -114,7 +114,7 @@ router.get("/:qID", async (req, res) => {
 	});
 
 	if (!question) {
-		return res.status(404).json({ message: "Question not found" });
+		throw new NotFoundError("Question not found");
 	}
 
 	res.json(formatQuestion(question));
