@@ -38,7 +38,7 @@ router.use((err, _req, res, next) => {
 
 const QuestionInput = z.object({
 	question: z.string().min(1),
-	answers: z.string().min(1),
+	answers: z.union([z.string(), z.array(z.string())]).nonoptional(),
 	keywords: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
