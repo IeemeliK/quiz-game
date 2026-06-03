@@ -99,6 +99,29 @@ router.get("/", async (req, res) => {
 	});
 });
 
+router.get("/random", async (req, res) => {
+	const questionCount = await prisma.question.count();
+	const count = Math.min(10, questionCount);
+
+	// Always get at least 10 records or amount equal to questionCount if questionCount < 10
+	const maxSkip = Math.max(0, questionCount - count);
+	const skip = Math.floor(Math.random() * (maxSkip + 1));
+
+	const randomQuestions = await prisma.question.findMany({
+		include: {
+			keywords: true,
+			answers: true,
+			user: true,
+			attempts: { where: { userId: req.user.userId } },
+		},
+		orderBy: { id: "asc" },
+		skip,
+		take: count,
+	});
+
+	res.json({ data: randomQuestions.map(formatQuestion) });
+});
+
 // GET /questions/:qID
 router.get("/:qID", async (req, res) => {
 	const qID = Number(req.params.qID);
