@@ -33,7 +33,9 @@ async function apiFetch(route, options = {}) {
 	if (token) headers["Authorization"] = `Bearer ${token}`;
 	const res = await fetch(`${CONFIG.API_URL}${route}`, { ...options, headers });
 	const data = await res.json();
-	if (!res.ok) throw new Error(data.error || data.msg || "Request failed");
+	if (!res.ok) {
+		throw new Error(data.error || data.msg || data.message || "Request failed");
+	}
 	return data;
 }
 
