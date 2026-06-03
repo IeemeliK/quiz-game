@@ -187,4 +187,42 @@ describe("question tests", () => {
 		expect(res.body.correct).toBe(false);
 		expect(res.body.correctAnswers).toEqual(["correct", "also correct"]);
 	});
+
+	it("returns an empty array if no random questions exist", async () => {
+		const token = await registerAndLogin();
+		const res = await request(app)
+			.get(`${QUESTION_URL}/random`)
+			.set("Authorization", `Bearer ${token}`);
+
+		expect(res.status).toBe(200);
+		expect(res.body.data).toEqual([]);
+	});
+
+	it("returns available random questions if less than 10 exist", async () => {
+		const token = await registerAndLogin();
+		await createQuestion(token, { question: "Q1" });
+		await createQuestion(token, { question: "Q2" });
+
+		const res = await request(app)
+			.get(`${QUESTION_URL}/random`)
+			.set("Authorization", `Bearer ${token}`);
+
+		expect(res.status).toBe(200);
+		expect(res.body.data).toHaveLength(2);
+	});
+
+	it("returns exactly 10 random questions if more than 10 exist", async () => {
+		const token = await registerAndLogin();
+
+		for (let i = 0; i < 15; i++) {
+			await createQuestion(token, { question: `Random Question ${i}` });
+		}
+
+		const res = await request(app)
+			.get(`${QUESTION_URL}/random`)
+			.set("Authorization", `Bearer ${token}`);
+
+		expect(res.status).toBe(200);
+		expect(res.body.data).toHaveLength(10);
+	});
 });
