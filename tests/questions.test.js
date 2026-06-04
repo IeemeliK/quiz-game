@@ -225,4 +225,85 @@ describe("question tests", () => {
 		expect(res.status).toBe(200);
 		expect(res.body.data).toHaveLength(10);
 	});
+
+	it("returns 400 when no file is provided", async () => {
+		const token = await registerAndLogin();
+		const res = await request(app)
+			.post(`${QUESTION_URL}/batch`)
+			.set("Authorization", `Bearer ${token}`);
+
+		expect(res.status).toBe(400);
+		expect(res.body.message).toBe("CSV file is required");
+	});
+
+	it("returns 400 when uploading a non-CSV file", async () => {
+		const token = await registerAndLogin();
+		const res = await request(app)
+			.post(`${QUESTION_URL}/batch`)
+			.set("Authorization", `Bearer ${token}`)
+			.attach("file", Buffer.from("just some text"), "test.txt");
+
+		expect(res.status).toBe(400);
+		expect(res.body.message).toBe("Only CSV files are allowed");
+	});
+
+	it("returns 400 when the CSV header is invalid", async () => {
+		const token = await registerAndLogin();
+		const csvData = Buffer.from("invalid,header,row\nQ,A,K");
+
+		const res = await request(app)
+			.post(`${QUESTION_URL}/batch`)
+			.set("Authorization", `Bearer ${token}`)
+			.attach("file", csvData, "wrong.csv");
+
+		expect(res.status).toBe(400);
+		expect(res.body.message).toBe(
+			"CSV must be in the form: question,answers,keywords",
+		);
+	});
+
+	it("returns 400 when there are no data rows", async () => {
+		const token = await registerAndLogin();
+		const csvData = Buffer.from("question,answers,keywords\n\n");
+
+		const res = await request(app)
+			.post(`${QUESTION_URL}/batch`)
+			.set("Authorization", `Bearer ${token}`)
+			.attach("file", csvData, "no-data.csv");
+
+		expect(res.status).toBe(400);
+		expect(res.body.message).toBe(
+			"CSV must contain a header row and at least one data row",
+		);
+	});
+
+	it("can create multiple questions from a valid CSV", async () => {
+		const token = await registerAndLogin();
+		const csvData = Buffer.from(
+			"question,answers,keywords\n" +
+				"What is 2+2?,4|four,math|easy\n" +
+				"Capital of France?,Paris,geography\n",
+		);
+
+		const res = await request(app)
+			.post(`${QUESTION_URL}/batch`)
+			.set("Authorization", `Bearer ${token}`)
+			.attach("file", csvData, "questions.csv");
+
+		expect(res.status).toBe(201);
+		expect(res.body.message).toBe("Created 2 questions");
+		expect(res.body.data).toHaveLength(2);
+
+		expect(res.body.data[0].question).toBe("What is 2+2?");
+		expect(res.body.data[0].answers).toEqual(
+			expect.arrayContaining(["4", "four"]),
+		);
+		expect(res.body.data[0].keywords).toEqual(
+			expect.arrayContaining(["math", "easy"]),
+		);
+
+		expect(res.body.data[1].question).toBe("Capital of France?");
+		expect(res.body.data[1].answers).toEqual(["Paris"]);
+		expect(res.body.data[1].keywords).toEqual(["geography"]);
+	});
 });
