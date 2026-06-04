@@ -24,12 +24,21 @@ const upload = multer({
 	limits: { fileSize: 5 * 1024 * 1024 },
 });
 
+const csvUpload = multer({
+	storage: multer.memoryStorage(),
+	fileFilter: (_req, file, cb) => {
+		if (file.mimetype === "text/csv") cb(null, true);
+		else cb(new ValidationError("Only CSV files are allowed"));
+	},
+});
+
 const router = express.Router();
 router.use(authenticate);
 router.use((err, _req, res, next) => {
 	if (
 		err instanceof multer.MulterError ||
-		err?.message === "Only image files are allowed"
+		err?.message === "Only image files are allowed" ||
+		err?.message === "Only CSV files are allowed"
 	) {
 		throw new NotFoundError(err.message);
 	}
@@ -99,6 +108,7 @@ router.get("/", async (req, res) => {
 	});
 });
 
+// GET /questions/random
 router.get("/random", async (req, res) => {
 	const questionCount = await prisma.question.count();
 	const count = Math.min(10, questionCount);
@@ -190,6 +200,74 @@ router.post("/", upload.single("image"), async (req, res) => {
 	req.log?.info(
 		{ qID: newQuestion.id, userId: req.user.userId },
 		"Question created",
+	);
+});
+
+router.post("/batch", csvUpload.single("file"), async (req, res) => {
+	if (!req.file) throw new ValidationError("CSV file is required");
+	const content = req.file.buffer.toString("utf-8");
+
+	// CSV spec technically requires a carriage return, but can't force users to do that hence the \r?
+	// filter instead of map because it removes empty lines after trimming since it is a falsy value
+	const lines = content.split(/\r?\n/).filter((line) => line.trim());
+
+	if (lines.length < 2) {
+		throw new ValidationError(
+			"CSV must contain a header row and at least one data row",
+		);
+	}
+
+	const header = lines.splice(0, 1)[0];
+	if (header.toLowerCase() !== "question,answers,keywords") {
+		throw new ValidationError(
+			"CSV must be in the form: question,answers,keywords",
+		);
+	}
+	// Expected format for data row: What is 1+1?,2|two,math|keyword
+	// answers and keywords separated by |
+	// TODO: Commas within data currently not supported
+	const queryPromises = lines.map(async (line) => {
+		const [q, a, k] = line.split(",");
+		if (!q || !a) return null;
+
+		const answerArray = a.split("|").filter((a) => a.trim());
+		const keywordArray = k ? k.split("|").filter((k) => k.trim()) : [];
+
+		return prisma.question.create({
+			data: {
+				question: q,
+				keywords: {
+					connectOrCreate: keywordArray.map((kw) => ({
+						where: { name: kw },
+						create: { name: kw },
+					})),
+				},
+				userId: req.user.userId,
+				answers: {
+					create: answerArray.map((a) => ({
+						answer: a,
+					})),
+				},
+			},
+			include: {
+				keywords: true,
+				answers: true,
+				user: true,
+			},
+		});
+	});
+
+	// get results from db queries and filter out unsuccessful inserts
+	const results = (await Promise.all(queryPromises)).filter(Boolean);
+
+	return res.status(201).json({
+		message: `Created ${results.length} questions`,
+		data: results.map(formatQuestion),
+	});
+
+	req.log?.info(
+		{ userId: req.user.userId, count: results.length },
+		"Batch questions created",
 	);
 });
 
