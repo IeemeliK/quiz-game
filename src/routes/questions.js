@@ -260,15 +260,15 @@ router.post("/batch", csvUpload.single("file"), async (req, res) => {
 	// get results from db queries and filter out unsuccessful inserts
 	const results = (await Promise.all(queryPromises)).filter(Boolean);
 
-	return res.status(201).json({
-		message: `Created ${results.length} questions`,
-		data: results.map(formatQuestion),
-	});
-
 	req.log?.info(
 		{ userId: req.user.userId, count: results.length },
 		"Batch questions created",
 	);
+
+	return res.status(201).json({
+		message: `Created ${results.length} questions`,
+		data: results.map(formatQuestion),
+	});
 });
 
 // PUT /questions/:qID
