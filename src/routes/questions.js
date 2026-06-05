@@ -2,10 +2,11 @@ import express from "express";
 import { prisma } from "../lib/prisma.js";
 import { authenticate } from "../middleware/auth.js";
 import { isOwner } from "../middleware/isOwner.js";
+import { generateQuestions } from "../lib/aiLib.js";
 import multer from "multer";
 import path from "node:path";
 import { z } from "zod";
-import { NotFoundError, ValidationError } from "../lib/errors.js";
+import { AppError, NotFoundError, ValidationError } from "../lib/errors.js";
 
 const storage = multer.diskStorage({
 	destination: path.join(import.meta.dirname, "..", "..", "public", "uploads"),
@@ -49,6 +50,11 @@ const QuestionInput = z.object({
 	question: z.string().min(1),
 	answers: z.union([z.string(), z.array(z.string())]).nonoptional(),
 	keywords: z.union([z.string(), z.array(z.string())]).optional(),
+});
+
+const GenerateInput = z.object({
+	amount: z.number().int().min(1).max(10).default(3),
+	topic: z.string().min(1),
 });
 
 function formatQuestion(question) {
@@ -201,6 +207,26 @@ router.post("/", upload.single("image"), async (req, res) => {
 		{ qID: newQuestion.id, userId: req.user.userId },
 		"Question created",
 	);
+});
+
+// POST /questions/generate
+router.post("/generate", async (req, res) => {
+	const { amount, topic } = GenerateInput.parse(req.body);
+
+	try {
+		const questions = await generateQuestions(amount, topic);
+		req.log?.info(
+			{ userId: req.user.userId, amount, topic },
+			"AI questions generated successfully",
+		);
+		res.status(200).json({ data: questions });
+	} catch (err) {
+		req.log?.error(
+			{ userId: req.user.userId, err: err.message },
+			"Failed to generate questions from AI service",
+		);
+		throw new AppError("Failed to generate questions from AI service", 502);
+	}
 });
 
 router.post("/batch", csvUpload.single("file"), async (req, res) => {
